@@ -1,6 +1,6 @@
 import * as SQLite from "expo-sqlite";
-import { useCallback, useEffect, useState } from "react";
-import { FlatList, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Alert, FlatList, View } from "react-native";
 import {
 	Button,
 	FAB,
@@ -29,23 +29,29 @@ type ShoppingItemFormData = {
 const DATABASE_NAME = "DB_RPL4";
 const TABLE_NAME = "shopping_items";
 
+const db = SQLite.openDatabaseSync(DATABASE_NAME, { useNewConnection: true });
+
 export default function HomeScreen() {
-	const [db] = useState(() =>
-		SQLite.openDatabaseSync(DATABASE_NAME, { useNewConnection: true }),
-	);
 	const [items, setItems] = useState<ShoppingItem[]>([]);
 	const [formData, setFormData] = useState<ShoppingItemFormData>({
 		title: "",
 		price: "",
 	});
-	const [editingItemId, setEditingItemId] = useState<number>(-1);
+	const [editingItemId, setEditingItemId] = useState<number | null>(null);
 	const [visible, setVisible] = useState(false);
 
 	const {
 		colors: { brandPrimary, onBrandPrimary },
 	} = useAppTheme();
 
-	const containerStyle = { backgroundColor: "white", padding: 24, margin: 24 };
+	const containerStyle = {
+		backgroundColor: "white",
+		padding: 24,
+		margin: 24,
+		borderRadius: 8,
+	};
+
+	const totalAmount = items.reduce((acc, cur) => acc + cur.price, 0);
 
 	function showModal() {
 		setVisible(true);
@@ -65,10 +71,10 @@ export default function HomeScreen() {
 	}
 
 	function clearEdit() {
-		setEditingItemId(-1);
+		setEditingItemId(null);
 	}
 
-	const getItems = useCallback(async () => {
+	async function getItems() {
 		try {
 			const sql = `
         SELECT id, title, price, isBought, createdAt 
@@ -81,14 +87,17 @@ export default function HomeScreen() {
 		} catch (err) {
 			console.error("Terjadi Kesalahan: ", err);
 		}
-	}, [db]);
+	}
 
 	async function addItem() {
 		try {
 			const title = formData.title.trim();
 			const price = Number(formData.price);
 
-			if (!title || Number.isNaN(price) || price < 0) return;
+			if (!title || formData.price === "" || Number.isNaN(price) || price < 0) {
+				Alert.alert("Gagal Menambahkan", "Kolom tidak boleh kosong!");
+				return;
+			}
 
 			const createdAt = new Date().toISOString();
 			const insertValues = [title, price, createdAt];
@@ -124,9 +133,12 @@ export default function HomeScreen() {
 			const price = Number(formData.price);
 			const id = editingItemId;
 
-			if (id < 0) return;
+			if (!id) return;
 
-			if (!title || Number.isNaN(price) || price < 0) return;
+			if (!title || formData.price === "" || Number.isNaN(price) || price < 0) {
+				Alert.alert("Gagal Menambahkan", "Kolom tidak boleh kosong!");
+				return;
+			}
 
 			const data = [title, price, id];
 			const sql = `UPDATE ${TABLE_NAME} SET title = ?, price = ? WHERE id = ?`;
@@ -149,7 +161,7 @@ export default function HomeScreen() {
 
 	async function deleteItem(id: number) {
 		try {
-			if (id < 0) return;
+			if (!id) return;
 
 			const sql = `DELETE FROM ${TABLE_NAME} WHERE id = ?`;
 
@@ -163,7 +175,7 @@ export default function HomeScreen() {
 
 	async function saveItem() {
 		try {
-			if (editingItemId < 0) {
+			if (!editingItemId) {
 				await addItem();
 				return;
 			}
@@ -197,30 +209,35 @@ export default function HomeScreen() {
 		}
 	}
 
-	useEffect(() => {
-		async function init() {
-			try {
-				const sql = `
-				CREATE TABLE IF NOT EXISTS ${TABLE_NAME} (
-					id INTEGER PRIMARY KEY AUTOINCREMENT,
-					title TEXT NOT NULL,
-					price INTEGER NOT NULL,
-					isBought INTEGER NOT NULL DEFAULT 0,
-					createdAt TEXT NOT NULL
-        		)`;
-				await db.runAsync(sql);
+	async function init() {
+		try {
+			const sql = `
+					CREATE TABLE IF NOT EXISTS ${TABLE_NAME} (
+						id INTEGER PRIMARY KEY AUTOINCREMENT,
+						title TEXT NOT NULL,
+						price INTEGER NOT NULL,
+						isBought INTEGER NOT NULL DEFAULT 0,
+						createdAt TEXT NOT NULL
+					)`;
+			await db.runAsync(sql);
 
-				await getItems();
-			} catch (err) {
-				console.error("Terjadi Kesalahan: ", err);
-			}
+			await getItems();
+		} catch (err) {
+			console.error("Terjadi Kesalahan: ", err);
 		}
+	}
+
+	useEffect(() => {
 		init();
-	}, [db, getItems]);
+	}, []);
 
 	return (
 		<View style={{ flex: 1 }}>
 			<ShoppingItemHeader />
+
+			<View style={{ margin: 16 }}>
+				<Text>Total Belanja: Rp {totalAmount.toLocaleString("id")}</Text>
+			</View>
 
 			<Portal>
 				<Modal
@@ -237,7 +254,7 @@ export default function HomeScreen() {
 							letterSpacing: 2,
 						}}
 					>
-						{editingItemId < 0 ? "Tambah Barang" : "Perbarui Barang"}
+						{!editingItemId ? "Tambah Barang" : "Perbarui Barang"}
 					</Text>
 					<View style={{ gap: 16 }}>
 						<TextInput
@@ -253,20 +270,29 @@ export default function HomeScreen() {
 							placeholder="Harga Barang"
 							value={formData.price}
 							onChangeText={(text) => setFormData({ ...formData, price: text })}
+							keyboardType="numeric"
 						/>
 					</View>
 					<View
 						style={{
 							flexDirection: "row",
 							justifyContent: "flex-end",
+							gap: 8,
 							marginTop: 16,
 						}}
 					>
 						<Button onPress={hideModal} textColor={brandPrimary}>
 							Batal
 						</Button>
-						<Button onPress={saveItem} textColor={brandPrimary}>
-							{editingItemId < 0 ? "Tambah" : "Perbarui"}
+						<Button
+							onPress={saveItem}
+							container={true}
+							buttonColor={brandPrimary}
+							textColor={onBrandPrimary}
+							mode="contained"
+							style={{ borderRadius: 8 }}
+						>
+							{!editingItemId ? "Tambah" : "Perbarui"}
 						</Button>
 					</View>
 				</Modal>
@@ -294,9 +320,11 @@ export default function HomeScreen() {
 				style={{
 					position: "absolute",
 					margin: 16,
+					marginBottom: 56,
 					right: 0,
 					bottom: 0,
 					backgroundColor: brandPrimary,
+					borderRadius: 8,
 				}}
 				onPress={() => showModal()}
 				color={onBrandPrimary}

@@ -6,7 +6,7 @@ const theme = {
 	custom: "property",
 	colors: {
 		...MD3LightTheme.colors,
-		brandPrimary: "#ED6A5E",
+		brandPrimary: "#EF476F",
 		onBrandPrimary: "#FFFFFF",
 	},
 };
